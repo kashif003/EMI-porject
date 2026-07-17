@@ -1,93 +1,78 @@
-# EMI 
+# EMI Project — IMU + BLE RSSI Indoor Localization with a Particle Filter
 
+A university project (Embedded Intelligence course, OTH Amberg-Weiden) that performs **indoor localization** by fusing **IMU sensor data** (accelerometer, gyroscope, magnetometer from an Arduino Nano 33 BLE Sense) with **BLE RSSI-based distance estimation**, feeding both into a custom **particle filter** to track a person's position and heading as they walk through a mapped indoor space.
 
+**Authors:** Nitesh Ramesh Morem, Kashif Riyaz (MAI, OTH Amberg-Weiden)
+
+## What it does
+
+1. **Data collection** (`logger.py`) — connects to an Arduino Nano 33 BLE Sense over Bluetooth Low Energy using `bleak`, streaming live accelerometer/gyroscope/magnetometer readings (via the BMI270/BMM150 IMU) plus RSSI readings from nearby BLE beacons, and logs everything to CSV.
+2. **Sensor fusion / heading estimation** (`sensorprocessing.ipynb`, and reproduced in `main.ipynb`):
+   - Computes a magnetometer-based compass heading (`arctan2` on the horizontal magnetic field).
+   - Adds tilt compensation using accelerometer-derived pitch/roll.
+   - Computes a gyroscope-integrated heading (yaw) from angular velocity.
+   - Combines both with a **complementary filter** (98% gyro / 2% magnetometer) to get a heading that resists gyro drift while staying responsive to fast turns.
+3. **RSSI → distance conversion** (`rssi_model.ipynb`):
+   - Calibrates a **log-distance path-loss model** from RSSI readings at a known reference distance.
+   - Converts live RSSI values from two BLE beacons into estimated distances, and cross-checks the distance trends against known heading-change events for sanity-checking.
+4. **Step detection** — a custom hybrid peak-detection function (`hybrid_step_detection`) finds footstep events in the accelerometer magnitude signal (threshold + minimum time interval + prominence), used to advance the particle filter by a fixed step length per detected step.
+5. **Particle filter localization** (in `main.ipynb`):
+   - `Particle` — represents one position/heading hypothesis, with a `move()` step that advances it using the estimated step length + heading (with noise), rejecting moves that land outside the mapped walkable area (checked via a polygon mask built with OpenCV).
+   - `ParticleFilter` — manages the full particle population: initializes particles around a known start point, moves them all on each detected step, reweights them based on how well their implied distances-to-beacons match the RSSI-derived distances, resamples based on weight, and estimates final position as the (weighted) average of surviving particles.
+   - Visualized live with **Pygame**, rendering the estimated path against the map.
+6. **Ablation comparisons** — the project explicitly compares three configurations to show what each signal source contributes:
+   - With map constraints + RSSI (best — converges closely to ground truth)
+   - With map, without RSSI
+   - Without any map constraint
+   - (Recorded as `.mp4` demo videos — see below)
+
+## Repository structure
+
+```
+EMI-porject/
+├── README.md / ReadMe.txt          # Project docs (submission notes: team, file listing)
+├── logger.py                        # BLE data logger (connects to Arduino Nano 33 BLE Sense, records IMU + RSSI to CSV)
+├── main.ipynb                       # Main notebook: heading fusion, step detection, particle filter, Pygame visualization
+├── sensorprocessing.ipynb           # Magnetometer/gyro/complementary-filter heading derivation (standalone deep-dive)
+├── rssi_model.ipynb                 # RSSI → distance path-loss model calibration and validation
+├── imu.csv                          # Raw logged IMU data
+├── imu_updated.csv                  # IMU data with derived heading columns (from main.ipynb)
+├── rssi.csv                         # Raw logged RSSI data
+├── WITH_MAP+RSSI.mp4                # Demo: particle filter with map constraints + RSSI
+├── WITHOUT_RSSI.mp4                 # Demo: particle filter with map, without RSSI
+└── WITHOUT_MAP_CONSTRAINTS.mp4       # Demo: particle filter without any map boundary constraint
+```
+
+## Requirements
+
+- Python packages (used across the notebooks and `logger.py`):
+  - `pandas`, `numpy`, `matplotlib`, `scipy` (peak detection via `find_peaks`)
+  - `opencv-python` (`cv2`) — for building the map polygon mask
+  - `pygame` — for the live particle filter visualization
+  - `bleak` — for BLE communication with the Arduino in `logger.py`
+- Hardware (only needed to *record new data*, not to reprocess the included CSVs): an Arduino Nano 33 BLE Sense running firmware that streams IMU + RSSI data over a custom BLE characteristic.
 
 ## Getting started
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+1. **Install dependencies**
+   ```bash
+   pip install pandas matplotlib scipy pygame numpy opencv-python bleak
+   ```
+2. **(Optional) Record new data** — flash the Arduino with compatible firmware, update the target device name and BLE UUIDs in `logger.py`, then run:
+   ```bash
+   python logger.py
+   ```
+3. **Reprocess/explore the included data** — open `main.ipynb` (uses the provided `imu.csv` and `rssi.csv`), or dig into `sensorprocessing.ipynb` and `rssi_model.ipynb` for the heading-fusion and RSSI-calibration derivations respectively.
+4. **Watch the demo videos** (`.mp4` files) to see the particle filter converge under the three tested configurations.
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+## Suggested new repo names
 
-## Add your files
+The current name (`EMI-porject`) has a typo and is generic — "EMI" mainly signals the course name, not what the project actually does. Some more descriptive alternatives:
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+- `imu-rssi-indoor-localization`
+- `ble-particle-filter-localization`
+- `indoor-positioning-imu-fusion`
+- `step-heading-particle-filter`
+- `imu-ble-indoor-tracker`
 
-```
-cd existing_repo
-git remote add origin https://git.oth-aw.de/0d6a/emi.git
-git branch -M main
-git push -uf origin main
-```
-
-## Integrate with your tools
-
-- [ ] [Set up project integrations](https://git.oth-aw.de/0d6a/emi/-/settings/integrations)
-
-## Collaborate with your team
-
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
-
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Any of these would make the repo self-explanatory from the name alone (and fix the "porject" typo along the way).
